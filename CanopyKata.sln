@@ -1,0 +1,30 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.24720.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "CanopyKata", "CanopyKata\CanopyKata.fsproj", "{5F881CF4-4791-41CF-A63B-8EA090A36D8D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".paket", ".paket", "{22A8C4FD-1DE5-4640-87C5-132EA835B30B}"
+	ProjectSection(SolutionItems) = preProject
+		.paket\paket.bootstrapper.exe = .paket\paket.bootstrapper.exe
+		paket.dependencies = paket.dependencies
+		paket.lock = paket.lock
+		.paket\paket.targets = .paket\paket.targets
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5F881CF4-4791-41CF-A63B-8EA090A36D8D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5F881CF4-4791-41CF-A63B-8EA090A36D8D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5F881CF4-4791-41CF-A63B-8EA090A36D8D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5F881CF4-4791-41CF-A63B-8EA090A36D8D}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
