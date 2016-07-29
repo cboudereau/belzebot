@@ -26,7 +26,7 @@ module DataBank =
     type private Cities = CsvProvider< """villes_france_sample.csv""", IgnoreErrors=true >
 
     let private rows = Cities.Load("""villes_france.csv""")
-    let private datas = rows.Rows |> Seq.map(fun i -> ZipCode i.``Code postal``, City i.``Nom reel``) |> Seq.toList
+    let private datas = rows.Rows |> Seq.map(fun i -> ZipCode i.``Code postal``, City i.Slug) |> Seq.toList
     let ZipCodeIndex =  datas |> Map.ofList
     let CityIndex = datas |> Seq.map(fun (x, y) -> y, x) |> Map.ofSeq
 
@@ -234,11 +234,12 @@ module SeLoger =
           Bids = bids |> Seq.toList }
 
     let detail (uri:Uri) : DetailedBid = 
+        let uri = "http://www.seloger.com/annonces/achat-de-prestige/maison/vulaines-sur-seine-77/110716509.htm?ci=770533&idtt=2&idtypebien=1,2&org=advanced_search&pxmin=700000" |> Uri
         uri |> string |> url
         
         let (zipCode, city) = 
             match uri.PathAndQuery.Split('/').[4] with
-            | Regex @"([^-0-9]*)" [DataBank.CityData city] -> city
+            | Regex @"([^0-9]*)-" [DataBank.CityData city] -> city
             | s -> failwithf "failed to parse city %s" s
                 
         { Bid = 
@@ -294,7 +295,7 @@ module Leboncoin =
             element "input.nude" << zipCode
             waitFor <| fun () -> element ".location-list" |> read <> ""
             elements ".location-list li"
-            |> List.filter(fun e -> e.Text.Contains(city))
+            |> List.filter(fun e -> e.Text |> String.icontains city)
             |> List.head
             |> click
 
@@ -517,6 +518,12 @@ start chrome
 pin Right
 open SearchDomain
 
+let c = 
+    [ SeLoger.search, SeLoger.detail
+      Leboncoin.search, Leboncoin.detail ]
+    |> crawl
+
+
 let searchResult = Leboncoin.search (PropertyCategory, ZipCode "77210", City "Samoreau", Some { Min=Price 300000m; Max= Price 380000m })
 let searchResult2 = SeLoger.search (PropertyCategory, ZipCode "77210", City "Samoreau", Some { Min=Price 300000m; Max= Price 380000m })
 //let searchResult = search "Voitures" "77210" "Samoreau" 
@@ -545,15 +552,13 @@ let z =
     |> Uri
     |> Leboncoin.detail
 
-let c = 
-    [ SeLoger.search, SeLoger.detail
-      Leboncoin.search, Leboncoin.detail ]
-    |> crawl
-
 //screenshot @"D:\" "log"
 
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
-let bid = "https://www.leboncoin.fr/ventes_immobilieres/985217137.htm?ca=12_s" |> Uri |> Leboncoin.detail
+//let bid = "https://www.leboncoin.fr/ventes_immobilieres/985217137.htm?ca=12_s" |> Uri |> Leboncoin.detail
+let bid = "http://www.seloger.com/annonces/achat-de-prestige/maison/vulaines-sur-seine-77/110716509.htm?ci=770533&idtt=2&idtypebien=1,2&org=advanced_search&pxmin=700000" |> Uri |> SeLoger.detail
+
+SeLoger.search (PropertyCategory, ZipCode "77870", City "Vulaines-sur-seine", Some { Min=Price 750000M; Max=Price 800000M })
 
 let r = c bid
 let rp = r |> Analyzer.distances Pruner.Property.prune bid
@@ -564,8 +569,8 @@ w.Datas |> Map.toList
 Pruner.Property.prune w
 Pruner.Property.prune x
 
-let one   = ("https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail)
-let other = ("http://www.seloger.com/annonces/achat/maison/samoreau-77/82469753.htm?ci=770442&idtt=2&idtypebien=1,2&org=advanced_search&pxmax=391600&pxmin=320400" |> Uri |> SeLoger.detail) 
+let one   = ("http://www.seloger.com/annonces/achat-de-prestige/maison/vulaines-sur-seine-77/110716509.htm?ci=770533&idtt=2&idtypebien=1,2&org=advanced_search&pxmin=700000" |> Uri |> SeLoger.detail)
+let other = ("https://www.leboncoin.fr/ventes_immobilieres/988627556.htm?ca=12_s" |> Uri |> Leboncoin.detail) 
 
 Analyzer.distance 
     (Pruner.Property.prune one) 
