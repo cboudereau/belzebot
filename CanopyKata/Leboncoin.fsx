@@ -1,5 +1,11 @@
 ﻿#r """..\packages\Selenium.WebDriver\lib\net40\WebDriver.dll"""
 #r """..\packages\canopy\lib\canopy.dll"""
+#r """..\packages\FSharp.Data\lib\net40\FSharp.Data.dll"""
+
+type City = City of string    
+type ZipCode = ZipCode of string
+
+type Depth = Depth of int
 
 open System
 
@@ -13,6 +19,23 @@ module String =
     let (|Contains|_|) search source = 
         if icontains search source then Some source
         else None
+
+module DataBank = 
+    open FSharp.Data
+
+    type private Cities = CsvProvider< """villes_france_sample.csv""", IgnoreErrors=true >
+
+    let private rows = Cities.Load("""villes_france.csv""")
+    let private datas = rows.Rows |> Seq.map(fun i -> ZipCode i.``Code postal``, City i.``Nom reel``) |> Seq.toList
+    let ZipCodeIndex =  datas |> Map.ofList
+    let CityIndex = datas |> Seq.map(fun (x, y) -> y, x) |> Map.ofSeq
+
+    let tryFindCity candidate = 
+        datas 
+        |> List.filter(fun (zc, City c) -> String.icontains candidate c)
+        |> List.tryHead
+
+    let (|CityData|_|) = tryFindCity
 
 module canopy = 
     open canopy
@@ -59,41 +82,51 @@ module canopy =
             |> Option.toList)
         |> Seq.toList
 
+    let setParameter name value (uri:Uri) = 
+        let anchor = sprintf "%s=" name
+        match uri.ToString() with
+        | u when uri.Query.Contains(anchor) ->
+            let parameters = 
+                uri.Query.Substring(1).Split('&')
+                |> Seq.map(fun pv -> 
+                    if pv.Contains(anchor) then sprintf "%s%s" anchor value
+                    else pv)
+            
+            sprintf "%s?%s" (uri.ToString().Split('?').[0]) (String.Join("&", parameters |> Seq.toArray))
+            |> Uri
+        | u -> 
+            if u.Contains("?") then sprintf "%s&%s=%s" u name value |> Uri
+            else sprintf "%s?%s=%s" u name value |> Uri
+
 module SearchDomain =
     type Title = Title of string
-    type City = City of string    
-    type ZipCode = ZipCode of string
+    type Price = Price of decimal
     
     type Range<'t> = { Min:'t; Max:'t }
+
+    type Category = 
+        | PropertyCategory 
+
+    type PageCount = PageCount of int
 
     type Bid = 
         { ZipCode:ZipCode
           City:City
+          Category:Category
+          Price:Price
           Url:Uri }
-
-    type PageCount = PageCount of int
 
     type SearchResult = 
         { Bids:Bid list
           PageCount: PageCount }
 
     type Author = Author of string
-    type Price = Price of decimal
-    type Category = Category of string
-
     type DetailedBid = 
-        { Author:Author
+        { Bid:Bid
+          Author:Author
           Title:Title
           Date:DateTime
-          Price:Price
-          ZipCode:ZipCode
-          City:City
-          Category:Category
-          Url:Uri
           Datas : Map<string, string> }
-    
-    module Categories = 
-        let Property = "Ventes immobilières" |> Category
 
 open canopy
 open runner
@@ -103,7 +136,7 @@ module Parser =
     
     let price data = 
         match data with
-        | Regex @"([0-9\s]*)" [p] -> p.Replace(" ", "") |> decimal |> Price
+        | Regex @"[^0-9]*([0-9\s]+)" [p] -> p.Replace(" ", "") |> decimal |> Price
         | _ -> failwith "enable to find price"
     
     let zipCode = function
@@ -126,31 +159,34 @@ module Cache =
     
     let cache now  =
         let datas = Dictionary<'a, (DateTime * 'b)>()
+        let o = new Object ()
         fun timeout f x ->
-            let now = now ()
-            match datas.TryGetValue(x) with
-            | true, (date, data) when date + timeout > now -> 
-                printfn "ok %O %A" date data
-                data
-            | true, (date, data) -> 
-                printfn "timeout %O / %A" date data
-                let v = f x
-                datas.[x] <- (now, v)
-                v
-            | _ -> 
-                printfn "missed %O / %A" now x
-                let v = f x
-                datas.[x] <- (now, v)
-                v
+            lock o <| fun () ->
+                let now = now ()
+                match datas.TryGetValue(x) with
+                | true, (date, data) when date + timeout > now -> 
+                    printfn "ok %O %A" date data
+                    data
+                | true, (date, data) -> 
+                    printfn "timeout %O / %A" date data
+                    let v = f x
+                    datas.[x] <- (now, v)
+                    v
+                | _ -> 
+                    printfn "missed %O / %A" now x
+                    let v = f x
+                    datas.[x] <- (now, v)
+                    v
 
 module SeLoger = 
     open SearchDomain
 
     let parseCity = function
-        | Regex @"[^à].+à\s*(.*)" [city] -> city |> City
+        | Regex @"[^à].+à\s*(.*)" [city] 
+        | Regex @"([^(]*)\s*" [city] -> city |> City
         | _ -> failwith "can't find seloger.com city from detail"
-
-    let search (_, ZipCode zipCode, City city, rangeO) = 
+    
+    let search (category, ZipCode zipCode, City city, rangeO) = 
         url "http://www.seloger.com/recherche-avancee.html?idtypebien=1,2"
         element "#ville_p" << city
         waitFor <| fun () -> element "#autoSuggestionsList_p" |> read |> String.icontains city
@@ -167,36 +203,68 @@ module SeLoger =
             element """input[name="pxmax"]""" << (pmax |> int |> string)
         | None -> ()
         
+        element "#ville_p" |> click
+
         press enter
-        
-        { PageCount = 
+
+        let pageCount = 
             match someElement "div.annonce__footer__pagination > p" |> Option.map read with
             | Some (Regex (@"[0-9]*\s*/\s*([0-9]*)") [p]) -> p |> int |> PageCount
             | _ -> PageCount 1
-          Bids = 
-            elements ".liste_resultat > article"
-            |> List.map(fun e ->
-                { ZipCode = ZipCode zipCode
-                  City = City city
-                  Url = e |> link |> Uri } ) }
+
+        let bids = 
+            let (PageCount pc) = pageCount
+            let rec bids i = 
+                seq {
+                    yield! 
+                        elements ".liste_resultat > article"
+                        |> List.map(fun e ->
+                            { ZipCode = ZipCode zipCode
+                              City = City city
+                              Category = category
+                              Url = e |> link |> Uri
+                              Price = e |> elementWithin "div > a.amount" |> read |> Parser.price } ) 
+                    if i < pc then
+                        let next = i + 1
+                        currentUrl () |> Uri |> setParameter "LISTING-LISTpg" (string next) |> string |> url
+                        yield! bids next }
+            bids 1
+        
+        { PageCount = pageCount
+          Bids = bids |> Seq.toList }
 
     let detail (uri:Uri) : DetailedBid = 
         uri |> string |> url
-        { Author = "" |> Author
-          Title = element "h1.detail-title" |> read |> Title
-          Category = Categories.Property
+        
+        let (zipCode, city) = 
+            match uri.PathAndQuery.Split('/').[4] with
+            | Regex @"([^-0-9]*)" [DataBank.CityData city] -> city
+            | s -> failwithf "failed to parse city %s" s
+                
+        { Bid = 
+            { Url = uri
+              ZipCode = zipCode
+              City = city
+              Category = Category.PropertyCategory
+              Price = 
+                match someElement "#price" with 
+                | Some e -> e
+                | None -> element ".price"
+                |> read |> Parser.price }
+          Author = "" |> Author
+          Title = 
+            match someElement "h1.detail-title" |> Option.map (read >> Title) with
+            | Some t -> t
+            | None -> Title ""
           Date = DateTime.UtcNow
-          Url = uri
-          ZipCode = 
-            element """input[name="codepostal"]""" |> read |> Parser.zipCode
-//            element "div.detail__prixImmo > h3 > span" |> read |> Parser.zipCode
-          City = element "#detail > h2" |> read |> parseCity
           Datas =     
-            elements "#detail > ol > li" 
-            |> List.map read
-            |> List.map(fun x -> x, x)
-            |> Map.ofList
-          Price = element "#price" |> read |> Parser.price }
+            try
+                elements "#detail > ol > li"
+                |> List.map read
+                |> List.map(fun x -> x, x)
+                |> Map.ofList
+            with 
+            | :? CanopyElementNotFoundException -> Map.empty }
 
 module Leboncoin = 
     open SearchDomain
@@ -207,7 +275,11 @@ module Leboncoin =
         | Regex @"([^0-9]*)\s*([0-9]*)" [city; zipCode] -> (City (city.Trim()), ZipCode zipCode)
         | l -> failwithf "failed to find city and zipcode %s" l
 
-    let search (Category category, zipCode, city, rangeO) = 
+    let search (category, zipCode, city, rangeO) = 
+        
+        let cat = 
+            match category with
+            | PropertyCategory -> "Ventes immobilières"
 
         url "https://www.leboncoin.fr/annonces/offres/"
         element "span.searchbar.toggleElement.button-white-mobile" |> click
@@ -239,12 +311,11 @@ module Leboncoin =
 
             function
             | Some range -> 
-//                let range = { Min=Price 175000M; Max=Price 265000M }
                 pricesOptions "#ps > option" |> selectPriceOption range.Min
                 pricesOptions "#pe > option" |> selectPriceOption range.Max
             | None -> ()
 
-        selectCategory category
+        selectCategory cat
         selectRange rangeO
         selectLocation zipCode city
         press enter
@@ -252,13 +323,30 @@ module Leboncoin =
         let toBid e = 
             { Bid.ZipCode = zipCode
               City = city
-              Url = Uri(e |> link) }
-
-        { Bids = elements "section.tabsContent li" |> List.map toBid
-          PageCount = 
+              Category = category
+              Url = Uri(e |> link)
+              Price = e |> elementWithin "a > section > h3" |> read |> Parser.price }
+        
+        let pageCount = 
             match someElement "a#last" |> Option.map(href >> Uri >> queryParameters >> List.filter(fst >> (=) "o") >> List.exactlyOne >> snd >> int) with
             | Some pageCount -> PageCount pageCount
-            | None -> PageCount 1 }
+            | None -> PageCount 1
+
+        let bids = 
+            let (PageCount pc) = pageCount
+            let rec bids i = 
+                seq {
+                    printfn "scanning lbc %i search page" i
+                    yield! elements "section.tabsContent li" |> List.map toBid
+                    if i < pc then 
+                        let next = i + 1
+                        currentUrl () |> Uri |> setParameter "o" (next |> string) |> string |> url
+                        yield! bids next }
+            
+            bids 1
+
+        { Bids = bids |> Seq.toList 
+          PageCount = pageCount }
 
     let detail (uri:Uri) = 
         uri |> string |> url
@@ -268,16 +356,20 @@ module Leboncoin =
             |> List.map(fun e -> e |> elementWithin "span.property" |> read, e|> elementWithin "span.value" |> read)
             |> Map.ofList
         
-        let (city, zipcode) = location datas
-        { Author=element ".title" |> read |> Author
+        let (city, zc) = location datas
+        { Bid = 
+            { Url=uri
+              ZipCode = zc
+              City = city
+              Price = datas |> Map.find "Prix" |> Parser.price
+              Category = 
+                match elements "#main > section > nav > ul li a" |> Seq.last |> read with
+                | "Ventes immobilières" -> Category.PropertyCategory
+                | _ -> failwith "failed to get leboncoin category" }
+          Author=element ".title" |> read |> Author
           Title = element "header > h1" |> read |> Title
-          Category = elements "#main > section > nav > ul li a" |> Seq.last |> read |> Category
           Date = DateTime.UtcNow
-          Url = uri
-          ZipCode = zipcode
-          City = city
-          Datas = datas
-          Price = datas |> Map.find "Prix" |> Parser.price }
+          Datas = datas }
 
 module Crawler = 
     open SearchDomain
@@ -289,18 +381,18 @@ module Crawler =
         |> List.collect(fun (search, detail) ->
             let sr = 
                 let range = 
-                    let (Price p) = bid.Price
+                    let (Price p) = bid.Bid.Price
                     { Min=Price (p * 0.9m); Max=Price (p * 1.1m) }
-                search (bid.Category, bid.ZipCode, bid.City, Some range)
+                search (bid.Bid.Category, bid.Bid.ZipCode, bid.Bid.City, Some range)
 
             sr.Bids
             |> List.map(fun b -> b.Url)
-            |> List.filter((<>) bid.Url)
+            |> List.filter((<>) bid.Bid.Url)
             |> List.map(fun uri -> detail uri))
 
 module Analyzer = 
     open SearchDomain
-    let distance x y = 
+    let distance (x) (y) = 
         let keys = Map.toList >> List.map fst
         let keys = x.Datas |> keys |> List.append (y.Datas |> keys) |> Set.ofList
 
@@ -310,13 +402,13 @@ module Analyzer =
             levenshtein titlex titley |> decimal
 
         let cityL = 
-            let (City cityx) = x.City
-            let (City cityy) = y.City
+            let (City cityx) = x.Bid.City
+            let (City cityy) = y.Bid.City
             levenshtein cityx cityy |> decimal
 
         let zipCodeL = 
-            let (ZipCode zipCodex) = x.ZipCode
-            let (ZipCode zipCodey) = y.ZipCode
+            let (ZipCode zipCodex) = x.Bid.ZipCode
+            let (ZipCode zipCodey) = y.Bid.ZipCode
             levenshtein zipCodex zipCodey |> decimal
 
         let (|Number|_|) v = 
@@ -407,16 +499,13 @@ module Pruner =
 
 open SearchDomain
 
-let crawl () = 
+let crawl searches = 
     let now () = DateTime.UtcNow
     let timeout = (TimeSpan.FromHours(8.))
     
-    let searches = 
-        [ SeLoger.search, SeLoger.detail
-          Leboncoin.search, Leboncoin.detail ]
-        |> Crawler.cached now timeout
+    let cachedSearches = searches |> Crawler.cached now timeout
     
-    fun bid -> Crawler.crawl searches bid
+    fun bid -> Crawler.crawl cachedSearches bid
         
         
 fsi.AddPrinter<Uri>(fun u -> u.ToString())
@@ -428,8 +517,8 @@ start chrome
 pin Right
 open SearchDomain
 
-let searchResult = Leboncoin.search (Categories.Property, ZipCode "77210", City "Samoreau", Some { Min=Price 300000m; Max= Price 380000m })
-let searchResult2 = SeLoger.search (Categories.Property, ZipCode "77210", City "Samoreau", Some { Min=Price 300000m; Max= Price 380000m })
+let searchResult = Leboncoin.search (PropertyCategory, ZipCode "77210", City "Samoreau", Some { Min=Price 300000m; Max= Price 380000m })
+let searchResult2 = SeLoger.search (PropertyCategory, ZipCode "77210", City "Samoreau", Some { Min=Price 300000m; Max= Price 380000m })
 //let searchResult = search "Voitures" "77210" "Samoreau" 
 
 //searchResult.Bids
@@ -456,12 +545,20 @@ let z =
     |> Uri
     |> Leboncoin.detail
 
-let c = crawl ()
-let bid = "https://www.leboncoin.fr/ventes_immobilieres/980996595.htm?ca=12_s" |> Uri |> Leboncoin.detail
+let c = 
+    [ SeLoger.search, SeLoger.detail
+      Leboncoin.search, Leboncoin.detail ]
+    |> crawl
+
+//screenshot @"D:\" "log"
+
+//let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
+let bid = "https://www.leboncoin.fr/ventes_immobilieres/985217137.htm?ca=12_s" |> Uri |> Leboncoin.detail
+
 let r = c bid
 let rp = r |> Analyzer.distances Pruner.Property.prune bid
 rp |> List.map fst
-rp |> Analyzer.correlated |> List.map(fun (s,b) -> s, b.Url) |> List.map snd
+rp |> Analyzer.correlated |> List.map(fun (s,b) -> s, b.Bid.Url) |> List.map snd
 
 w.Datas |> Map.toList
 Pruner.Property.prune w
@@ -474,10 +571,11 @@ Analyzer.distance
     (Pruner.Property.prune one) 
     (Pruner.Property.prune other)
 
-SeLoger.search ("", ZipCode "77210", City "Samoreau", None)
+//SeLoger.search (Categories.Property, ZipCode "77210", City "Samoreau", None)
 
 quit ()
 
+Leboncoin.search (Category.PropertyCategory, ZipCode "77210", City "Avon", None)
 
 let bagnole = 
     "https://www.leboncoin.fr/voitures/981613128.htm?ca=12_s"

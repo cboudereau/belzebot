@@ -67,6 +67,8 @@
     <None Include="Google.fsx" />
     <Compile Include="Geny.fsx" />
     <None Include="Uplea.fsx" />
+    <None Include="villes_france_sample.csv" />
+    <None Include="villes_france.csv" />
     <None Include="Leboncoin.fsx" />
   </ItemGroup>
   <ItemGroup>
