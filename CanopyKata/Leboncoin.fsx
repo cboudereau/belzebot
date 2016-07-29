@@ -235,7 +235,6 @@ module SeLoger =
           Bids = bids |> Seq.toList }
 
     let detail (uri:Uri) : DetailedBid = 
-        let uri = "http://www.seloger.com/annonces/achat-de-prestige/maison/vulaines-sur-seine-77/110716509.htm?ci=770533&idtt=2&idtypebien=1,2&org=advanced_search&pxmin=700000" |> Uri
         uri |> string |> url
         
         let (zipCode, city) = 
