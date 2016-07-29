@@ -556,10 +556,10 @@ let z =
 
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/985217137.htm?ca=12_s" |> Uri |> Leboncoin.detail
-let bid = "https://www.leboncoin.fr/ventes_immobilieres/999255737.htm?ca=12_s" |> Uri |> Leboncoin.detail
 
 SeLoger.search (PropertyCategory, ZipCode "75011", City "Paris", Some { Min=Price 100000M; Max=Price 150000M })
 
+let bid = "https://www.leboncoin.fr/ventes_immobilieres/999255737.htm?ca=12_s" |> Uri |> Leboncoin.detail
 let r = c bid
 let rp = r |> Analyzer.distances Pruner.Property.prune bid
 rp |> List.map fst
