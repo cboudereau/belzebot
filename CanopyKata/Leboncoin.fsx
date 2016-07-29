@@ -188,10 +188,11 @@ module SeLoger =
     
     let search (category, ZipCode zipCode, City city, rangeO) = 
         url "http://www.seloger.com/recherche-avancee.html?idtypebien=1,2"
-        element "#ville_p" << city
+        element "#ville_p" << zipCode
         waitFor <| fun () -> element "#autoSuggestionsList_p" |> read |> String.icontains city
         elements "#autoSuggestionsList_p > ul > li"
         |> List.filter(fun e -> e |> read |> String.icontains city)
+        |> List.filter(fun e -> e |> read |> String.icontains zipCode)
         |> List.head
         |> click
 
@@ -556,9 +557,9 @@ let z =
 
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/985217137.htm?ca=12_s" |> Uri |> Leboncoin.detail
-let bid = "http://www.seloger.com/annonces/achat-de-prestige/maison/vulaines-sur-seine-77/110716509.htm?ci=770533&idtt=2&idtypebien=1,2&org=advanced_search&pxmin=700000" |> Uri |> SeLoger.detail
+let bid = "https://www.leboncoin.fr/ventes_immobilieres/999255737.htm?ca=12_s" |> Uri |> Leboncoin.detail
 
-SeLoger.search (PropertyCategory, ZipCode "77870", City "Vulaines-sur-seine", Some { Min=Price 750000M; Max=Price 800000M })
+SeLoger.search (PropertyCategory, ZipCode "75011", City "Paris", Some { Min=Price 100000M; Max=Price 150000M })
 
 let r = c bid
 let rp = r |> Analyzer.distances Pruner.Property.prune bid
