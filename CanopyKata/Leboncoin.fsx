@@ -1,6 +1,9 @@
 ﻿#r """..\packages\Selenium.WebDriver\lib\net40\WebDriver.dll"""
 #r """..\packages\canopy\lib\canopy.dll"""
 #r """..\packages\FSharp.Data\lib\net40\FSharp.Data.dll"""
+#r """..\packages\Outatime\lib\net452\Outatime.dll"""
+
+open Outatime
 
 type City = City of string    
 type ZipCode = ZipCode of string
@@ -99,11 +102,14 @@ module canopy =
             else sprintf "%s?%s=%s" u name value |> Uri
 
 module SearchDomain =
-    type Title = Title of string
-    type Price = Price of decimal
+    open SetTheory
     
-    type Range<'t> = { Min:'t; Max:'t }
-
+    type Title = Title of string
+    type Price = 
+        | Price of decimal
+        static member MaxValue = Price Decimal.MaxValue
+        static member MinValue = Price Decimal.MinValue
+        
     type Category = 
         | PropertyCategory 
 
@@ -180,6 +186,7 @@ module Cache =
 
 module SeLoger = 
     open SearchDomain
+    open SetTheory
 
     let parseCity = function
         | Regex @"[^à].+à\s*(.*)" [city] 
@@ -198,8 +205,8 @@ module SeLoger =
 
         match rangeO with 
         | Some range ->
-            let (Price pmin) = range.Min
-            let (Price pmax) = range.Max
+            let (Price pmin) = range.Start
+            let (Price pmax) = range.End
             element """input[name="pxmin"]""" << (pmin |> int |> string)
             element """input[name="pxmax"]""" << (pmax |> int |> string)
         | None -> ()
@@ -269,6 +276,7 @@ module SeLoger =
 
 module Leboncoin = 
     open SearchDomain
+    open SetTheory
     open Parser
 
     let private location datas = 
@@ -312,8 +320,8 @@ module Leboncoin =
 
             function
             | Some range -> 
-                pricesOptions "#ps > option" |> selectPriceOption range.Min
-                pricesOptions "#pe > option" |> selectPriceOption range.Max
+                pricesOptions "#ps > option" |> selectPriceOption range.Start
+                pricesOptions "#pe > option" |> selectPriceOption range.End
             | None -> ()
 
         selectCategory cat
@@ -374,6 +382,7 @@ module Leboncoin =
 
 module Crawler = 
     open SearchDomain
+    open SetTheory
 
     let cached now timeout searches = searches |> List.map(fun (x, y) -> Cache.cache now timeout x, Cache.cache now timeout y)
 
@@ -383,7 +392,7 @@ module Crawler =
             let sr = 
                 let range = 
                     let (Price p) = bid.Bid.Price
-                    { Min=Price (p * 0.9m); Max=Price (p * 1.1m) }
+                    { Start=Price (p * 0.9m); End=Price (p * 1.1m) }
                 search (bid.Bid.Category, bid.Bid.ZipCode, bid.Bid.City, Some range)
 
             sr.Bids
@@ -524,8 +533,8 @@ let c =
     |> crawl
 
 
-let searchResult = Leboncoin.search (PropertyCategory, ZipCode "77210", City "Samoreau", Some { Min=Price 300000m; Max= Price 380000m })
-let searchResult2 = SeLoger.search (PropertyCategory, ZipCode "77210", City "Samoreau", Some { Min=Price 300000m; Max= Price 380000m })
+let searchResult = Leboncoin.search (PropertyCategory, ZipCode "77210", City "Samoreau", Some { Start=Price 300000m; End= Price 380000m })
+let searchResult2 = SeLoger.search (PropertyCategory, ZipCode "77210", City "Samoreau", Some { Start=Price 300000m; End= Price 380000m })
 //let searchResult = search "Voitures" "77210" "Samoreau" 
 
 //searchResult.Bids
@@ -557,9 +566,9 @@ let z =
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/985217137.htm?ca=12_s" |> Uri |> Leboncoin.detail
 
-SeLoger.search (PropertyCategory, ZipCode "75011", City "Paris", Some { Min=Price 100000M; Max=Price 150000M })
+SeLoger.search (PropertyCategory, ZipCode "75011", City "Paris", Some { Start=Price 100000M; End=Price 150000M })
 
-let bid = "https://www.leboncoin.fr/ventes_immobilieres/999255737.htm?ca=12_s" |> Uri |> Leboncoin.detail
+let bid = "https://www.leboncoin.fr/ventes_immobilieres/917447320.htm?ca=12_s" |> Uri |> Leboncoin.detail
 let r = c bid
 let rp = r |> Analyzer.distances Pruner.Property.prune bid
 rp |> List.map fst
