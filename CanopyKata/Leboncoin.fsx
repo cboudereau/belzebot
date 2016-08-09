@@ -3,7 +3,8 @@
 #r """..\packages\FSharp.Data\lib\net40\FSharp.Data.dll"""
 #r """..\packages\Outatime\lib\net452\Outatime.dll"""
 
-open Outatime
+open SetTheory
+open System
 
 type City = City of string    
 type ZipCode = ZipCode of string
@@ -163,6 +164,33 @@ module DataKind =
 module Cache = 
     open System.Collections.Generic
     
+    let intervalCache now = 
+        let datas = Dictionary<'a, IntervalValuedSet<'i, DateTime * 'b>>()
+        let o = new Object ()
+
+        fun timeout f x ->
+            lock o <| fun () ->
+                let now = now ()
+                match datas.TryGetValue(x.Value) with
+                | true, data -> 
+                    let cached = 
+                        data 
+                        |> SetTheory.contiguous 
+                        |> SetTheory.clamp x.Interval
+                        |> SetTheory.map(fun i ->
+                            function
+                            | Some (date, value) when date + timeout > now -> date, value
+                            | _ -> 
+                                printfn "missed partial interval %A" i
+                                let data = f (i := x.Value) in now, data.Value)
+                    datas.[x.Value] <- cached
+                    cached |> SetTheory.lift snd
+                | false, _ -> 
+                    printfn "missed full interval"
+                    let data = f x
+                    datas.[x.Value] <- (data.Interval := (now, data.Value)) |> List.singleton |> SetTheory.build
+                    data |> List.singleton |> SetTheory.build
+
     let cache now  =
         let datas = Dictionary<'a, (DateTime * 'b)>()
         let o = new Object ()
@@ -193,7 +221,10 @@ module SeLoger =
         | Regex @"([^(]*)\s*" [city] -> city |> City
         | _ -> failwith "can't find seloger.com city from detail"
     
-    let search (category, ZipCode zipCode, City city, rangeO) = 
+    let search criteria = 
+        let (category, ZipCode zipCode, City city) = criteria.Value
+        let range = criteria.Interval
+        
         url "http://www.seloger.com/recherche-avancee.html?idtypebien=1,2"
         element "#ville_p" << zipCode
         waitFor <| fun () -> element "#autoSuggestionsList_p" |> read |> String.icontains city
@@ -203,13 +234,10 @@ module SeLoger =
         |> List.head
         |> click
 
-        match rangeO with 
-        | Some range ->
-            let (Price pmin) = range.Start
-            let (Price pmax) = range.End
-            element """input[name="pxmin"]""" << (pmin |> int |> string)
-            element """input[name="pxmax"]""" << (pmax |> int |> string)
-        | None -> ()
+        let (Price pmin) = range.Start
+        let (Price pmax) = range.End
+        element """input[name="pxmin"]""" << (pmin |> int |> string)
+        element """input[name="pxmax"]""" << (pmax |> int |> string)
         
         element "#ville_p" |> click
 
@@ -237,9 +265,7 @@ module SeLoger =
                         currentUrl () |> Uri |> setParameter "LISTING-LISTpg" (string next) |> string |> url
                         yield! bids next }
             bids 1
-        
-        { PageCount = pageCount
-          Bids = bids |> Seq.toList }
+        range := { PageCount = pageCount; Bids = bids |> Seq.toList }
 
     let detail (uri:Uri) : DetailedBid = 
         uri |> string |> url
@@ -284,8 +310,10 @@ module Leboncoin =
         | Regex @"([^0-9]*)\s*([0-9]*)" [city; zipCode] -> (City (city.Trim()), ZipCode zipCode)
         | l -> failwithf "failed to find city and zipcode %s" l
 
-    let search (category, zipCode, city, rangeO) = 
-        
+    let search criteria = 
+        let (category, zipCode, city) = criteria.Value
+        let range = criteria.Interval
+
         let cat = 
             match category with
             | PropertyCategory -> "Ventes immobilières"
@@ -307,7 +335,7 @@ module Leboncoin =
             |> List.head
             |> click
 
-        let selectRange = 
+        let selectRange range = 
             let selectPriceOption v values = 
                 values |> List.skipWhile(fst >> (>) v) |> List.head |> snd |> click            
 
@@ -318,14 +346,11 @@ module Leboncoin =
                     | PriceData p -> [ p, e ]
                     | _ -> [])
 
-            function
-            | Some range -> 
-                pricesOptions "#ps > option" |> selectPriceOption range.Start
-                pricesOptions "#pe > option" |> selectPriceOption range.End
-            | None -> ()
+            pricesOptions "#ps > option" |> selectPriceOption range.Start
+            pricesOptions "#pe > option" |> selectPriceOption range.End
 
         selectCategory cat
-        selectRange rangeO
+        selectRange range
         selectLocation zipCode city
         press enter
 
@@ -354,8 +379,7 @@ module Leboncoin =
             
             bids 1
 
-        { Bids = bids |> Seq.toList 
-          PageCount = pageCount }
+        range := { Bids = bids |> Seq.toList; PageCount = pageCount }
 
     let detail (uri:Uri) = 
         uri |> string |> url
@@ -384,7 +408,7 @@ module Crawler =
     open SearchDomain
     open SetTheory
 
-    let cached now timeout searches = searches |> List.map(fun (x, y) -> Cache.cache now timeout x, Cache.cache now timeout y)
+    let cached now timeout searches = searches |> List.map(fun (x, y) -> Cache.intervalCache now timeout x, Cache.cache now timeout y)
 
     let crawl searches bid = 
         searches
@@ -393,9 +417,11 @@ module Crawler =
                 let range = 
                     let (Price p) = bid.Bid.Price
                     { Start=Price (p * 0.9m); End=Price (p * 1.1m) }
-                search (bid.Bid.Category, bid.Bid.ZipCode, bid.Bid.City, Some range)
+                search (range := bid.Bid.Category, bid.Bid.ZipCode, bid.Bid.City)
 
-            sr.Bids
+            sr
+            |> SetTheory.toList
+            |> List.collect(fun s -> s.Value.Bids)
             |> List.map(fun b -> b.Url)
             |> List.filter((<>) bid.Bid.Url)
             |> List.map(fun uri -> detail uri))
@@ -533,8 +559,8 @@ let c =
     |> crawl
 
 
-let searchResult = Leboncoin.search (PropertyCategory, ZipCode "77210", City "Samoreau", Some { Start=Price 300000m; End= Price 380000m })
-let searchResult2 = SeLoger.search (PropertyCategory, ZipCode "77210", City "Samoreau", Some { Start=Price 300000m; End= Price 380000m })
+let searchResult = Leboncoin.search(Price 300000m => Price 380000m := PropertyCategory, ZipCode "77210", City "Samoreau")
+let searchResult2 = SeLoger.search (Price 300000m => Price 380000m := PropertyCategory, ZipCode "77210", City "Samoreau")
 //let searchResult = search "Voitures" "77210" "Samoreau" 
 
 //searchResult.Bids
@@ -566,9 +592,9 @@ let z =
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/985217137.htm?ca=12_s" |> Uri |> Leboncoin.detail
 
-SeLoger.search (PropertyCategory, ZipCode "75011", City "Paris", Some { Start=Price 100000M; End=Price 150000M })
+SeLoger.search (Price 100000M => Price 150000M := PropertyCategory, ZipCode "75011", City "Paris")
 
-let bid = "https://www.leboncoin.fr/ventes_immobilieres/917447320.htm?ca=12_s" |> Uri |> Leboncoin.detail
+let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
 let r = c bid
 let rp = r |> Analyzer.distances Pruner.Property.prune bid
 rp |> List.map fst
@@ -589,7 +615,7 @@ Analyzer.distance
 
 quit ()
 
-Leboncoin.search (Category.PropertyCategory, ZipCode "77210", City "Avon", None)
+Leboncoin.search (Price.MinValue => Price.MaxValue := Category.PropertyCategory, ZipCode "77210", City "Avon")
 
 let bagnole = 
     "https://www.leboncoin.fr/voitures/981613128.htm?ca=12_s"
