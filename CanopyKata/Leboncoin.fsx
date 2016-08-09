@@ -77,6 +77,8 @@ module canopy =
 
     let href element = attribute "href" element
 
+    let htmlClass element = attribute "class" element
+
     let link (element:IWebElement) = element |> elementWithin "a" |> href
 
     let queryParameters (uri:Uri) = 
@@ -116,8 +118,6 @@ module SearchDomain =
     type Category = 
         | PropertyCategory 
 
-    type PageCount = PageCount of int
-
     type Bid = 
         { ZipCode:ZipCode
           City:City
@@ -126,8 +126,7 @@ module SearchDomain =
           Url:Uri }
 
     type SearchResult = 
-        { Bids:Bid list
-          PageCount: PageCount }
+        { Bids:Bid list }
 
     type Author = Author of string
     type DetailedBid = 
@@ -181,8 +180,6 @@ module Cache =
                         (x.Interval := (now, data.Value)) 
                         |> List.singleton 
                         |> SetTheory.build 
-                        |> SetTheory.toList
-                        |> SetTheory.build
                     
                     datas.[x.Value] <- (update |> SetTheory.contiguous)
                     
@@ -239,6 +236,47 @@ module Cache =
                     datas.[x] <- (now, v)
                     v
 
+module Pap = 
+    open SearchDomain
+    open SetTheory
+
+    let search criteria = 
+        let (category, ZipCode zipCode, City city) = criteria.Value
+        let range = criteria.Interval
+        let (Price pmin) = range.Start
+        let (Price pmax) = range.End
+
+        url "http://www.pap.fr/annonce/vente-immobiliere"
+        
+        element "#token-input-geo_objets_ids" << sprintf "%s %s" city zipCode
+        press enter
+        element "#prix_min" << (pmin |> int |> string)
+        element "#prix_max" << (pmax |> int |> string)
+        press enter
+
+        let bids =
+            let rec bids () = 
+                seq {
+                    yield! 
+                        elements ".search-results-item"
+                        |> List.filter(fun e -> e |> htmlClass |> String.icontains "annonce" |> not)
+                        |> List.map(fun e ->
+                            { Category = category
+                              ZipCode = ZipCode zipCode
+                              City = City city
+                              Price = (e |> elementWithin ".price" |> read).Replace(".", "") |> Parser.price
+                              Url = Uri(e |> link) }) 
+                    match someElement ".next" with
+                    | Some next when next.Displayed ->
+                        click next
+                        yield! bids ()
+                    | _ -> yield! Seq.empty }
+
+            bids ()
+        
+        range := { Bids = bids |> Seq.toList }
+        
+
 module SeLoger = 
     open SearchDomain
     open SetTheory
@@ -272,11 +310,10 @@ module SeLoger =
 
         let pageCount = 
             match someElement "div.annonce__footer__pagination > p" |> Option.map read with
-            | Some (Regex (@"[0-9]*\s*/\s*([0-9]*)") [p]) -> p |> int |> PageCount
-            | _ -> PageCount 1
+            | Some (Regex (@"[0-9]*\s*/\s*([0-9]*)") [p]) -> p |> int
+            | _ -> 1
 
         let bids = 
-            let (PageCount pc) = pageCount
             let rec bids i = 
                 seq {
                     yield! 
@@ -287,12 +324,12 @@ module SeLoger =
                               Category = category
                               Url = e |> link |> Uri
                               Price = e |> elementWithin "div > a.amount" |> read |> Parser.price } ) 
-                    if i < pc then
+                    if i < pageCount then
                         let next = i + 1
                         currentUrl () |> Uri |> setParameter "LISTING-LISTpg" (string next) |> string |> url
                         yield! bids next }
             bids 1
-        range := { PageCount = pageCount; Bids = bids |> Seq.toList }
+        range := { Bids = bids |> Seq.toList }
 
     let detail (uri:Uri) : DetailedBid = 
         uri |> string |> url
@@ -390,23 +427,22 @@ module Leboncoin =
         
         let pageCount = 
             match someElement "a#last" |> Option.map(href >> Uri >> queryParameters >> List.filter(fst >> (=) "o") >> List.exactlyOne >> snd >> int) with
-            | Some pageCount -> PageCount pageCount
-            | None -> PageCount 1
+            | Some pageCount -> pageCount
+            | None -> 1
 
         let bids = 
-            let (PageCount pc) = pageCount
             let rec bids i = 
                 seq {
                     printfn "scanning lbc %i search page" i
                     yield! elements "section.tabsContent li" |> List.map toBid
-                    if i < pc then 
+                    if i < pageCount then 
                         let next = i + 1
                         currentUrl () |> Uri |> setParameter "o" (next |> string) |> string |> url
                         yield! bids next }
             
             bids 1
 
-        range := { Bids = bids |> Seq.toList; PageCount = pageCount }
+        range := { Bids = bids |> Seq.toList }
 
     let detail (uri:Uri) = 
         uri |> string |> url
