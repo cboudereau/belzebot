@@ -165,32 +165,56 @@ module Cache =
     open System.Collections.Generic
     
     let intervalCache now = 
-        let datas = Dictionary<'a, IntervalValuedSet<'i, DateTime * 'b>>()
+        let datas = Dictionary<'a, IntervalValuedSet<'i, (DateTime * 'b) option>>()
         let o = new Object ()
 
         fun timeout f x ->
             lock o <| fun () ->
                 let now = now ()
                 match datas.TryGetValue(x.Value) with
-                | true, data -> 
-                    let cached = 
-                        data 
-                        |> SetTheory.contiguous 
-                        |> SetTheory.clamp x.Interval
-                        |> SetTheory.map(fun i ->
-                            function
-                            | Some (date, value) when date + timeout > now -> date, value
-                            | _ -> 
-                                printfn "missed partial interval %A" i
-                                let data = f (i := x.Value) in now, data.Value)
-                    datas.[x.Value] <- cached
-                    cached |> SetTheory.lift snd
                 | false, _ -> 
                     printfn "missed full interval"
                     let data = f x
-                    datas.[x.Value] <- (data.Interval := (now, data.Value)) |> List.singleton |> SetTheory.build
-                    data |> List.singleton |> SetTheory.build
+                    let update = 
+                        (x.Interval := (now, data.Value)) 
+                        |> List.singleton 
+                        |> SetTheory.build 
+                        |> SetTheory.toList
+                        |> SetTheory.build
+                    
+                    datas.[x.Value] <- (update |> SetTheory.contiguous)
+                    
+                    update |> SetTheory.lift snd
+                | true, data -> 
+                    let update = 
+                        data
+                        |> SetTheory.clamp x.Interval
+                        |> SetTheory.map(fun i ->
+                            function
+                            | Some (date, value) when date + timeout > now -> 
+                                (date, value)
+                            | Some (date, _) ->
+                                printfn "timeout %O" date
+                                let data = f (i := x.Value)
+                                (now, data.Value)
+                            | _ -> 
+                                printfn "missed partial interval %A" i
+                                let data = f (i := x.Value) 
+                                (now, data.Value))
+                        |> SetTheory.toList
+                        |> SetTheory.build
+                    
+                    datas.[x.Value] <- 
+                        update
+                        |> SetTheory.contiguous
+                        |> SetTheory.lift2 (fun xO yO -> 
+                            match xO, yO with
+                            | Some x, Some y -> Some y
+                            | Some v, _ | _, Some v -> Some v
+                            | None, None -> None) datas.[x.Value]
 
+                    update |> SetTheory.lift snd
+                        
     let cache now  =
         let datas = Dictionary<'a, (DateTime * 'b)>()
         let o = new Object ()
@@ -594,7 +618,8 @@ let z =
 
 SeLoger.search (Price 100000M => Price 150000M := PropertyCategory, ZipCode "75011", City "Paris")
 
-let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
+//let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
+let bid = "https://www.leboncoin.fr/ventes_immobilieres/917447320.htm?ca=12_s" |> Uri |> Leboncoin.detail
 let r = c bid
 let rp = r |> Analyzer.distances Pruner.Property.prune bid
 rp |> List.map fst
