@@ -3,6 +3,8 @@
 #r """..\packages\FSharp.Data\lib\net40\FSharp.Data.dll"""
 #r """..\packages\Outatime\lib\net452\Outatime.dll"""
 
+//Chearper.ly
+
 open SetTheory
 open System
 
@@ -212,6 +214,7 @@ module Cache =
                             | Some x, Some y -> Some y
                             | Some v, _ | _, Some v -> Some v
                             | None, None -> None) datas.[x.Value]
+                        |> SetTheory.merge
 
                     update |> SetTheory.lift snd
                         
@@ -616,10 +619,8 @@ let z =
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/985217137.htm?ca=12_s" |> Uri |> Leboncoin.detail
 
-SeLoger.search (Price 100000M => Price 150000M := PropertyCategory, ZipCode "75011", City "Paris")
-
-//let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
-let bid = "https://www.leboncoin.fr/ventes_immobilieres/917447320.htm?ca=12_s" |> Uri |> Leboncoin.detail
+let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
+//let bid = "https://www.leboncoin.fr/ventes_immobilieres/917447320.htm?ca=12_s" |> Uri |> Leboncoin.detail
 let r = c bid
 let rp = r |> Analyzer.distances Pruner.Property.prune bid
 rp |> List.map fst
