@@ -69,7 +69,10 @@
     <None Include="Uplea.fsx" />
     <None Include="villes_france_sample.csv" />
     <None Include="villes_france.csv" />
+    <Compile Include="String.fs" />
+    <Compile Include="canopy.fs" />
     <None Include="Leboncoin.fsx" />
+    <None Include="Cars.fsx" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="mscorlib" />

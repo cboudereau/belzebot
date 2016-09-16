@@ -3,6 +3,8 @@
 #r """..\packages\FSharp.Data\lib\net40\FSharp.Data.dll"""
 #r """..\packages\Outatime\lib\net452\Outatime.dll"""
 
+#load "String.fs"
+#load "canopy.fs"
 //Chearper.ly
 
 open SetTheory
@@ -15,16 +17,6 @@ type Depth = Depth of int
 
 open System
 
-module String = 
-    let icontains (search:string) (source:string) = 
-        match search, source with
-        | null, null -> true
-        | _, null | null, _ -> false
-        | _ -> source.IndexOf(search, StringComparison.InvariantCultureIgnoreCase) <> -1
-
-    let (|Contains|_|) search source = 
-        if icontains search source then Some source
-        else None
 
 module DataBank = 
     open FSharp.Data
@@ -42,69 +34,6 @@ module DataBank =
         |> List.tryHead
 
     let (|CityData|_|) = tryFindCity
-
-module canopy = 
-    open canopy
-    open OpenQA.Selenium
-    open System.Text.RegularExpressions
-    let (|Regex|_|) pattern input =
-        let m = Regex.Match(input, pattern)
-        if m.Success then Some(List.tail [ for g in m.Groups -> g.Value ])
-        else None
-
-    let levenshtein word1 word2 =
-        let preprocess = fun (str : string) -> str.ToLower().ToCharArray()
-        let chars1, chars2 = preprocess word1, preprocess word2
-        let m, n = chars1.Length, chars2.Length
-        let table : int[,] = Array2D.zeroCreate (m + 1) (n + 1)
-        for i in 0..m do
-            for j in 0..n do
-                match i, j with
-                | i, 0 -> table.[i, j] <- i
-                | 0, j -> table.[i, j] <- j
-                | _, _ ->
-                    let delete = table.[i-1, j] + 1
-                    let insert = table.[i, j-1] + 1
-                    //cost of substitution is 2
-                    let substitute = 
-                        if chars1.[i - 1] = chars2.[j - 1] 
-                            then table.[i-1, j-1] //same character
-                            else table.[i-1, j-1] + 2
-                    table.[i, j] <- List.min [delete; insert; substitute]
-        table.[m, n]
-
-    let attribute name (element:IWebElement) = element.GetAttribute(name)
-
-    let href element = attribute "href" element
-
-    let htmlClass element = attribute "class" element
-
-    let link (element:IWebElement) = element |> elementWithin "a" |> href
-
-    let queryParameters (uri:Uri) = 
-        uri.Query.Substring(1).Split('&') 
-        |> Seq.collect(fun x -> 
-            match x.Split('=') with
-            | [|name;value|] -> Some (name, value)
-            | _ -> None
-            |> Option.toList)
-        |> Seq.toList
-
-    let setParameter name value (uri:Uri) = 
-        let anchor = sprintf "%s=" name
-        match uri.ToString() with
-        | u when uri.Query.Contains(anchor) ->
-            let parameters = 
-                uri.Query.Substring(1).Split('&')
-                |> Seq.map(fun pv -> 
-                    if pv.Contains(anchor) then sprintf "%s%s" anchor value
-                    else pv)
-            
-            sprintf "%s?%s" (uri.ToString().Split('?').[0]) (String.Join("&", parameters |> Seq.toArray))
-            |> Uri
-        | u -> 
-            if u.Contains("?") then sprintf "%s&%s=%s" u name value |> Uri
-            else sprintf "%s?%s=%s" u name value |> Uri
 
 module SearchDomain =
     open SetTheory
@@ -144,16 +73,16 @@ module Parser =
     
     let price data = 
         match data with
-        | Regex @"[^0-9]*([0-9\s]+)" [p] -> p.Replace(" ", "") |> decimal |> Price
+        | String.Regex @"[^0-9]*([0-9\s]+)" [p] -> p.Replace(" ", "") |> decimal |> Price
         | _ -> failwith "enable to find price"
     
     let zipCode = function
-        | Regex @"([0-9]{5})" [zp] -> zp |> ZipCode
+        | String.Regex @"([0-9]{5})" [zp] -> zp |> ZipCode
         | _ -> failwith "failed to find zip code"
 
     let (|PriceData|_|) data = 
         match data with
-        | Regex @"([0-9\s]{2,})" [p] -> p.Replace(" ", "") |> decimal |> Price |> Some
+        | String.Regex @"([0-9\s]{2,})" [p] -> p.Replace(" ", "") |> decimal |> Price |> Some
         | _ -> None
 
 module DataKind = 
@@ -240,7 +169,11 @@ module Pap =
     open SearchDomain
     open SetTheory
 
+    let private parsePrice p = (p:string).Replace(".", "") |> Parser.price
+
     let search criteria = 
+//        let criteria = Price 200000M => Price 250000M := (PropertyCategory, ZipCode "77210", City "Samoreau")
+        
         let (category, ZipCode zipCode, City city) = criteria.Value
         let range = criteria.Interval
         let (Price pmin) = range.Start
@@ -249,7 +182,10 @@ module Pap =
         url "http://www.pap.fr/annonce/vente-immobiliere"
         
         element "#token-input-geo_objets_ids" << sprintf "%s %s" city zipCode
-        press enter
+        waitFor <| fun () -> 
+            let value = element ".token-input-dropdown-facebook" |> read 
+            value |> String.icontains "recherche" |> not && value <> ""
+        element ".token-input-dropdown-facebook" |> click
         element "#prix_min" << (pmin |> int |> string)
         element "#prix_max" << (pmax |> int |> string)
         press enter
@@ -264,7 +200,7 @@ module Pap =
                             { Category = category
                               ZipCode = ZipCode zipCode
                               City = City city
-                              Price = (e |> elementWithin ".price" |> read).Replace(".", "") |> Parser.price
+                              Price = e |> elementWithin ".price" |> read |> parsePrice
                               Url = Uri(e |> link) }) 
                     match someElement ".next" with
                     | Some next when next.Displayed ->
@@ -275,15 +211,47 @@ module Pap =
             bids ()
         
         range := { Bids = bids |> Seq.toList }
+
+    let detail (uri:Uri) : DetailedBid = 
+        uri |> string |> url
         
+        let (zipCode, city) = 
+            match element ".item-geoloc > h2" |> read with
+            | String.Regex @"([^0-9]+)\s+\(([0-9]+)" [city; zipCode] -> ZipCode zipCode, City city
+            | s -> failwithf "failed to parse city %s" s
+                
+        { Bid = 
+            { Url = uri
+              ZipCode = zipCode
+              City = city
+              Category = Category.PropertyCategory
+              Price = element ".price" |> read |> parsePrice }
+          Author = "" |> Author
+          Title = Title browser.Title
+          Date = DateTime.UtcNow
+          Datas =     
+            let allData = 
+                elements ".item-summary > li" 
+                |> List.map read
+                |> List.map (fun r -> 
+                    match r.Split([|Environment.NewLine|], StringSplitOptions.RemoveEmptyEntries) |> Array.toList with
+                    | n :: v :: _ -> n, v
+                    | v -> failwith "enable to parse value %A")
+                |> Map.ofList
+
+            let l = 
+                match element ".energy-box" |> elementWithin ".rank" |> htmlClass with
+                | String.Regex @"rank-([A-Z]{1})" [l] -> l
+                | _ -> failwith "failed to find energy class letter"
+            allData |> Map.add "Classe énergie" l }
 
 module SeLoger = 
     open SearchDomain
     open SetTheory
 
     let parseCity = function
-        | Regex @"[^à].+à\s*(.*)" [city] 
-        | Regex @"([^(]*)\s*" [city] -> city |> City
+        | String.Regex @"[^à].+à\s*(.*)" [city] 
+        | String.Regex @"([^(]*)\s*" [city] -> city |> City
         | _ -> failwith "can't find seloger.com city from detail"
     
     let search criteria = 
@@ -310,7 +278,7 @@ module SeLoger =
 
         let pageCount = 
             match someElement "div.annonce__footer__pagination > p" |> Option.map read with
-            | Some (Regex (@"[0-9]*\s*/\s*([0-9]*)") [p]) -> p |> int
+            | Some (String.Regex (@"[0-9]*\s*/\s*([0-9]*)") [p]) -> p |> int
             | _ -> 1
 
         let bids = 
@@ -336,7 +304,7 @@ module SeLoger =
         
         let (zipCode, city) = 
             match uri.PathAndQuery.Split('/').[4] with
-            | Regex @"([^0-9]*)-" [DataBank.CityData city] -> city
+            | String.Regex @"([^0-9]*)-" [DataBank.CityData city] -> city
             | s -> failwithf "failed to parse city %s" s
                 
         { Bid = 
@@ -371,7 +339,7 @@ module Leboncoin =
 
     let private location datas = 
         match datas |> Map.find "Ville" with
-        | Regex @"([^0-9]*)\s*([0-9]*)" [city; zipCode] -> (City (city.Trim()), ZipCode zipCode)
+        | String.Regex @"([^0-9]*)\s*([0-9]*)" [city; zipCode] -> (City (city.Trim()), ZipCode zipCode)
         | l -> failwithf "failed to find city and zipcode %s" l
 
     let search criteria = 
@@ -434,11 +402,14 @@ module Leboncoin =
             let rec bids i = 
                 seq {
                     printfn "scanning lbc %i search page" i
-                    yield! elements "section.tabsContent li" |> List.map toBid
-                    if i < pageCount then 
-                        let next = i + 1
-                        currentUrl () |> Uri |> setParameter "o" (next |> string) |> string |> url
-                        yield! bids next }
+                    match someElement "section.tabsContent" with
+                    | Some tabs -> 
+                        yield! tabs |> elementsWithin "li" |> List.map toBid
+                        if i < pageCount then 
+                            let next = i + 1
+                            currentUrl () |> Uri |> setParameter "o" (next |> string) |> string |> url
+                            yield! bids next
+                    | None -> yield! Seq.empty }
             
             bids 1
 
@@ -549,38 +520,38 @@ module Pruner =
     module Property = 
         let private (|EnergyClassData|_|) (k,v) = 
             let (|Letter|_|) = function
-                | Regex "([A-Z])\s" [c] -> Some c
+                | String.Regex "([A-Z])\s" [c] -> Some c
                 | _ -> None
 
             match k, v with
             | String.Contains "Classe énergie" _, Letter l -> Some (DataKind.EnergyClass, l)
-            | _, Regex "DPE\s*\:\s*([A-Z])\s" [l] -> Some (DataKind.EnergyClass, l)
+            | _, String.Regex "DPE\s*\:\s*([A-Z])\s" [l] -> Some (DataKind.EnergyClass, l)
             | _ -> None
 
         let private (|GESData|_|) (k, v) = 
             let (|Letter|_|) = function
-                | Regex "([A-Z])\s" [c] -> Some c
+                | String.Regex "([A-Z])\s" [c] -> Some c
                 | _ -> None
 
             match k, v with
-            | _, Regex "GES\s*\:\s*([A-Z])\s" [l] -> Some (DataKind.GES, l)
+            | _, String.Regex "GES\s*\:\s*([A-Z])\s" [l] -> Some (DataKind.GES, l)
             | String.Contains "GES" _, Letter l -> Some (DataKind.GES, l)
             | _ -> None
 
         let private (|NumberOfRoomsData|_|) (k,v) = 
             match k, v with
             | "Pièces", _ -> Some (DataKind.NumberOfRooms, v)
-            | _, Regex "([0-9]+)\s*Pièces" [v] -> Some (DataKind.NumberOfRooms, v)
+            | _, String.Regex "([0-9]+)\s*Pièces" [v] -> Some (DataKind.NumberOfRooms, v)
             | _ -> None
         
         let private (|SurfaceData|_|) (k,v) = 
             let (|Number|_|) = function
-                | Regex "([0-9]{2,})" [surface] -> Some surface
+                | String.Regex "([0-9]{2,})" [surface] -> Some surface
                 | _ -> None
             
             match k, v with
             | "Surface", Number n -> Some (DataKind.Surface, n)
-            | _, Regex "Surface\s*de\s*([0-9]*)" [v] -> Some (DataKind.Surface, v)
+            | _, String.Regex "Surface\s*de\s*([0-9]*)" [v] -> Some (DataKind.Surface, v)
             | _ -> None
         
         let prune b = 
@@ -617,12 +588,13 @@ pin Right
 open SearchDomain
 
 let c = 
-    [ SeLoger.search, SeLoger.detail
+    [ 
+      SeLoger.search, SeLoger.detail
       Leboncoin.search, Leboncoin.detail ]
     |> crawl
 
 
-let searchResult = Leboncoin.search(Price 300000m => Price 380000m := PropertyCategory, ZipCode "77210", City "Samoreau")
+let searchResult = Pap.search(Price 300000m => Price 380000m := PropertyCategory, ZipCode "77210", City "Samoreau")
 let searchResult2 = SeLoger.search (Price 300000m => Price 380000m := PropertyCategory, ZipCode "77210", City "Samoreau")
 //let searchResult = search "Voitures" "77210" "Samoreau" 
 
@@ -656,7 +628,7 @@ let z =
 //let bid = "https://www.leboncoin.fr/ventes_immobilieres/985217137.htm?ca=12_s" |> Uri |> Leboncoin.detail
 
 let bid = "https://www.leboncoin.fr/ventes_immobilieres/950107746.htm?ca=12_s" |> Uri |> Leboncoin.detail
-//let bid = "https://www.leboncoin.fr/ventes_immobilieres/917447320.htm?ca=12_s" |> Uri |> Leboncoin.detail
+//let bid = "https://www.leboncoin.fr/ventes_immobilieres/913646798.htm?ca=12_s" |> Uri |> Leboncoin.detail
 let r = c bid
 let rp = r |> Analyzer.distances Pruner.Property.prune bid
 rp |> List.map fst
