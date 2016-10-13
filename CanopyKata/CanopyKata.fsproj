@@ -65,14 +65,17 @@
     <None Include="paket.references" />
     <None Include="Api.fsx" />
     <None Include="Google.fsx" />
-    <Compile Include="Geny.fsx" />
+    <None Include="Geny.fsx" />
     <None Include="Uplea.fsx" />
     <None Include="villes_france_sample.csv" />
     <None Include="villes_france.csv" />
+    <Compile Include="Slack.fs" />
+    <None Include="rtmStart.sample.json" />
+    <None Include="rtmMessage.sample.json" />
     <Compile Include="String.fs" />
     <Compile Include="canopy.fs" />
     <None Include="Leboncoin.fsx" />
-    <None Include="Cars.fsx" />
+    <Compile Include="Cars.fsx" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="mscorlib" />
@@ -158,6 +161,28 @@
       <ItemGroup>
         <Reference Include="WebDriver">
           <HintPath>..\packages\Selenium.WebDriver\lib\net40\WebDriver.dll</HintPath>
+          <Private>True</Private>
+          <Paket>True</Paket>
+        </Reference>
+      </ItemGroup>
+    </When>
+  </Choose>
+  <Choose>
+    <When Condition="$(TargetFrameworkIdentifier) == '.NETFramework' And ($(TargetFrameworkVersion) == 'v4.5.2' Or $(TargetFrameworkVersion) == 'v4.5.3' Or $(TargetFrameworkVersion) == 'v4.6' Or $(TargetFrameworkVersion) == 'v4.6.1' Or $(TargetFrameworkVersion) == 'v4.6.2' Or $(TargetFrameworkVersion) == 'v4.6.3')">
+      <ItemGroup>
+        <Reference Include="Topshelf">
+          <HintPath>..\packages\Topshelf\lib\net452\Topshelf.dll</HintPath>
+          <Private>True</Private>
+          <Paket>True</Paket>
+        </Reference>
+      </ItemGroup>
+    </When>
+  </Choose>
+  <Choose>
+    <When Condition="$(TargetFrameworkIdentifier) == '.NETFramework' And ($(TargetFrameworkVersion) == 'v4.0' Or $(TargetFrameworkVersion) == 'v4.5' Or $(TargetFrameworkVersion) == 'v4.5.1' Or $(TargetFrameworkVersion) == 'v4.5.2' Or $(TargetFrameworkVersion) == 'v4.5.3' Or $(TargetFrameworkVersion) == 'v4.6' Or $(TargetFrameworkVersion) == 'v4.6.1' Or $(TargetFrameworkVersion) == 'v4.6.2' Or $(TargetFrameworkVersion) == 'v4.6.3')">
+      <ItemGroup>
+        <Reference Include="Topshelf.FSharp">
+          <HintPath>..\packages\Topshelf.FSharp\lib\net40\Topshelf.FSharp.dll</HintPath>
           <Private>True</Private>
           <Paket>True</Paket>
         </Reference>

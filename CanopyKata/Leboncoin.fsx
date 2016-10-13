@@ -183,9 +183,9 @@ module Pap =
         
         element "#token-input-geo_objets_ids" << sprintf "%s %s" city zipCode
         waitFor <| fun () -> 
-            let value = element ".token-input-dropdown-facebook" |> read 
+            let value = element ".token-input-dropdown" |> read 
             value |> String.icontains "recherche" |> not && value <> ""
-        element ".token-input-dropdown-facebook" |> click
+        element ".token-input-dropdown" |> click
         element "#prix_min" << (pmin |> int |> string)
         element "#prix_max" << (pmax |> int |> string)
         press enter
@@ -255,13 +255,20 @@ module SeLoger =
         | _ -> failwith "can't find seloger.com city from detail"
     
     let search criteria = 
+//let criteria = (Price 300000m => Price 380000m := PropertyCategory, ZipCode "77000", City "Melun")
+//quit ()
+//start chrome
+
         let (category, ZipCode zipCode, City city) = criteria.Value
         let range = criteria.Interval
         
         url "http://www.seloger.com/recherche-avancee.html?idtypebien=1,2"
-        element "#ville_p" << zipCode
-        waitFor <| fun () -> element "#autoSuggestionsList_p" |> read |> String.icontains city
-        elements "#autoSuggestionsList_p > ul > li"
+        element "#search_localisation" |> click
+        waitFor <| fun () -> (someElement ".deploy" |> Option.isSome)
+        element "#search_localisation" << zipCode
+        
+        waitFor <| fun () -> elements ".ui-menu-item" |> List.exists(read >> String.icontains city)
+        elements ".ui-menu-item"
         |> List.filter(fun e -> e |> read |> String.icontains city)
         |> List.filter(fun e -> e |> read |> String.icontains zipCode)
         |> List.head
@@ -269,13 +276,11 @@ module SeLoger =
 
         let (Price pmin) = range.Start
         let (Price pmax) = range.End
-        element """input[name="pxmin"]""" << (pmin |> int |> string)
-        element """input[name="pxmax"]""" << (pmax |> int |> string)
+        element """input[name="prix_min"]""" << (pmin |> int |> string)
+        element """input[name="prix_max"]""" << (pmax |> int |> string)
+        element "#submit_ok" |> click
+        element ".valid" |> click
         
-        element "#ville_p" |> click
-
-        press enter
-
         let pageCount = 
             match someElement "div.annonce__footer__pagination > p" |> Option.map read with
             | Some (String.Regex (@"[0-9]*\s*/\s*([0-9]*)") [p]) -> p |> int
@@ -588,7 +593,7 @@ pin Right
 open SearchDomain
 
 let c = 
-    [ 
+    [ //Pap.search, Pap.detail
       SeLoger.search, SeLoger.detail
       Leboncoin.search, Leboncoin.detail ]
     |> crawl
@@ -596,6 +601,7 @@ let c =
 
 let searchResult = Pap.search(Price 300000m => Price 380000m := PropertyCategory, ZipCode "77210", City "Samoreau")
 let searchResult2 = SeLoger.search (Price 300000m => Price 380000m := PropertyCategory, ZipCode "77210", City "Samoreau")
+let searchResult3 = Leboncoin.search (Price 300000m => Price 380000m := PropertyCategory, ZipCode "77210", City "Samoreau")
 //let searchResult = search "Voitures" "77210" "Samoreau" 
 
 //searchResult.Bids

@@ -8,4 +8,7 @@ NUGET
       Zlib.Portable (>= 1.11) - framework: portable-net45+sl5+win8, portable-net45+win8, portable-net45+win8+wp8+wpa81
     Outatime (1.5.2)
     Selenium.WebDriver (2.53.1)
+    Topshelf (4.0.1)
+    Topshelf.FSharp (2.1)
+      Topshelf (>= 3.2)
     Zlib.Portable (1.11) - framework: portable-net45+sl5+win8, portable-net45+win8, portable-net45+win8+wp8+wpa81
